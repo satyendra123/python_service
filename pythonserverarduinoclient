@@ -1,0 +1,74 @@
+python code as a server
+import socket
+import mysql.connector
+import time
+import threading
+
+# Server IP and Port
+SERVER_IP = '192.168.1.157'  # Adjust to your server's IP
+SERVER_PORT = 7000
+INITIAL_MESSAGE = "|ENTRY%"  # Command to send to Arduino
+
+# MySQL database configuration
+db_config = {
+    'host': '192.168.40.100',
+    'user': 'root',
+    'password': '',
+    'database': 'paytm_park'
+}
+
+# Function to handle client (Arduino)
+def handle_client(client_socket):
+    print("Arduino client connected.")
+    while True:
+        # Check the database for exitbarrier status
+        try:
+            conn = mysql.connector.connect(**db_config)
+            cursor = conn.cursor()
+
+            query = "SELECT exitbarrier FROM boomsig"
+            cursor.execute(query)
+            result = cursor.fetchone()
+
+            if result:
+                exit_barrier_status = result[0]
+                if exit_barrier_status == 'Y':
+                    print("Exit barrier is open (Y detected). Sending command to Arduino.")
+                    # Send the command to the Arduino client
+                    client_socket.sendall(INITIAL_MESSAGE.encode())
+
+                    # Reset the barrier to 'N' after sending the command
+                    cursor.execute("UPDATE boomsig SET exitbarrier = 'N'")
+                    conn.commit()
+                    print("Exit barrier status reset to 'N' after sending the command.")
+
+            cursor.close()
+            conn.close()
+        except mysql.connector.Error as err:
+            print(f"Database error: {err}")
+
+        # Wait before checking the database again
+        time.sleep(2)
+
+# Function to start the server and accept client connections
+def start_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((SERVER_IP, SERVER_PORT))
+    server_socket.listen(5)
+    print(f"Server started on {SERVER_IP}:{SERVER_PORT}")
+
+    while True:
+        # Wait for Arduino to connect
+        client_socket, client_address = server_socket.accept()
+        print(f"Connection accepted from {client_address}")
+
+        # Handle the client communication in a separate thread
+        client_thread = threading.Thread(target=handle_client, args=(client_socket,))
+        client_thread.daemon = True
+        client_thread.start()
+
+if __name__ == "__main__":
+    start_server()
+
+
+arduino as a client
