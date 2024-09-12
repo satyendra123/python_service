@@ -2,7 +2,7 @@
 
 Step-1 follo this link https://nagasudhir.blogspot.com/2022/09/run-python-flask-server-as-windows.html
 
-step-2 sabse pahle hum ek python ka code likhenge jo ki mera ye hai man lo ki ye is folder me hai.
+step-2 sabse pahle hum ek python ka code likhenge jo ki mera ye hai man lo ki ye is folder me hai C:\fastag_rfid is folder me mera python .py ka code hai exit2boom.py name se
 import socket
 import datetime
 import time
@@ -109,6 +109,6 @@ if __name__ == "__main__":
 #Step-3 so sabse pahle hum apna exit2boom.py code ko exit2boom.exe me convert kar lunga kuch ia tarah se pyinstaller --onefile exit2boom.py so dist folder me mera ek .exe ban jayega is exe ko mai cut karke apne isi folder me paste kar dunga C:\fastag_rfid
 
 #step-4 sabse pahle hum cmd open karenge admininstrator se C:\WINDOWS\system32>cd C:\fastag_rfid      means pahle cmd open krenge administrator se to ye system32 ka open karke dega uske bd hum apne files wale path ko copy krenge
-aur cd likhkar paste kar denge. so mera cmd is folder me open ho jayega jaha mera exe wali file hai. aur uske bad mai apna nssm.exe install exitboom2controller "%cd%\exitboom2controller.exe" ye command likhunga install ke bad wo
+aur cd likhkar paste kar denge. so mera cmd is folder me open ho jayega jaha mera exe wali file hai. aur uske bad mai apna nssm.exe install exitboom2controller "%cd%\exit2boom.exe" ye command likhunga install ke bad wo
 name hai jo mai apne services ka naam rakhna chahta hu aur cd ke bad wo command hai jo mai apna exe run karna chahta hu is services se. so ye mera work kar rha hai sahi se
 
