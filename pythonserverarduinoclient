@@ -1,4 +1,6 @@
-python code as a server
+python code as a server- isme humne database ka connection kaisa banaya hai wo samjhne ki kosis karte hai. man lo mere pass ek system hai aur usme mera database ka file dala hua hai aur mere apss ek aur system hai aur ye code mai dusre system me chala rha hu aur mai chahta hu ki 
+ye jo mera client system hai isme jo python code chal rha hai. wo server wale db se connect ho jaye to mujhe host me localhost ki jagah par server wale system ki ip dalni hogi. jaise man lo ki mera database jis system me chal rha hai uski ip hai 192.168.40.100 to mujhe database me host ji jagah par ye ip likhni hogi
+aur ye dono system connected rhne chahiye lan cable se ek dusre se. switch aur router ke through
 import socket
 import mysql.connector
 import time
