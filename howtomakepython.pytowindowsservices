@@ -12,6 +12,7 @@ import threading
 SERVER_IP = '192.168.1.157'
 SERVER_PORT = 7000
 INITIAL_MESSAGE = "|ENTRY%"
+HLT_MESSAGE = "|HLT%"
 LOG_FILE = "exit_connection_log.txt"
 
 # MySQL database configuration
@@ -22,15 +23,15 @@ def log_message(message):
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log.write(f"{timestamp}: {message}\n")
 
-def send_initial_message(client_socket):
+def send_message(client_socket, message):
     try:
-        client_socket.sendall(INITIAL_MESSAGE.encode())
-        log_message(f"Sent initial message: {INITIAL_MESSAGE}")
-        
+        client_socket.sendall(message.encode())
+        log_message(f"Sent message: {message}")
     except Exception as e:
-        log_message(f"Failed to send initial message: {e}")
+        log_message(f"Failed to send message: {e}")
 
 def check_exit_boom(client_socket):
+    last_status = None
     while True:
         try:
             conn = mysql.connector.connect(**db_config)
@@ -43,12 +44,14 @@ def check_exit_boom(client_socket):
             if result:
                 exit_boom_status = result[0]
                 if exit_boom_status == 'Y':
-                    log_message("Exit boom is open")
-                    send_initial_message(client_socket)
-                    time.sleep(3)
-                    cursor.execute("UPDATE boomsig1 SET exitboom = 'N'")
-                    conn.commit()
-                    log_message("Exit boom status reset to 'N' after 3 seconds")
+                    if last_status != 'Y':
+                        log_message("Exit boom is open")
+                        send_message(client_socket, INITIAL_MESSAGE)
+                        time.sleep(3)  # Simulate wait time
+                        cursor.execute("UPDATE boomsig1 SET exitboom = 'N'")
+                        conn.commit()
+                        log_message("Exit boom status reset to 'N' after 3 seconds")
+                last_status = exit_boom_status
 
             cursor.close()
             conn.close()
@@ -58,6 +61,14 @@ def check_exit_boom(client_socket):
         
         time.sleep(1)  # Adjust the sleep duration as needed to control the check frequency
 
+def send_health_packets(client_socket):
+    while True:
+        try:
+            send_message(client_socket, HLT_MESSAGE)
+            time.sleep(30)  # Send health packet every 30 seconds
+        except Exception as e:
+            log_message(f"Failed to send health packet: {e}")
+
 def main():
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -66,9 +77,14 @@ def main():
         log_message(f"Connected to {SERVER_IP}:{SERVER_PORT}")
 
         # Start the exit boom check in a separate thread
-        thread = threading.Thread(target=check_exit_boom, args=(client_socket,))
-        thread.daemon = True
-        thread.start()
+        thread_check = threading.Thread(target=check_exit_boom, args=(client_socket,))
+        thread_check.daemon = True
+        thread_check.start()
+
+        # Start sending health packets in a separate thread
+        thread_health = threading.Thread(target=send_health_packets, args=(client_socket,))
+        thread_health.daemon = True
+        thread_health.start()
 
         while True:
             data = client_socket.recv(1024)
