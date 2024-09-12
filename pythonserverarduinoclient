@@ -72,3 +72,68 @@ if __name__ == "__main__":
 
 
 arduino as a client
+#include <SPI.h>
+#include <Ethernet.h>
+
+#define relayPin 8
+
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };  // MAC address for Ethernet shield
+IPAddress serverIp(192, 168, 1, 157);  // Python server's IP address
+int serverPort = 7000;  // Python server's port
+
+EthernetClient client;
+String clientData = "";
+
+void setup() {
+  Ethernet.begin(mac);
+  Serial.begin(9600);
+
+  while (!Serial) {
+    ;  // Wait for serial port to connect (only needed for native USB port)
+  }
+
+  Serial.print("Arduino IP: ");
+  Serial.println(Ethernet.localIP());
+
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, HIGH);  // Ensure relay is off
+
+  connectToServer();  // Try to connect to the Python server initially
+}
+
+void loop() {
+  if (!client.connected()) {
+    Serial.println("Reconnecting to server...");
+    connectToServer();
+  } else {
+    if (client.available() > 0) {
+      char thisChar = client.read();
+      if (thisChar == '|') {
+        clientData = "";  // Start of new message
+      } else if (thisChar == '%') {
+        processServerMessage();  // End of message, process it
+      } else {
+        clientData += thisChar;  // Accumulate the message
+      }
+    }
+  }
+}
+
+void connectToServer() {
+  if (client.connect(serverIp, serverPort)) {
+    Serial.println("Connected to Python server");
+  } else {
+    Serial.println("Connection failed, retrying...");
+    delay(5000);  // Wait before retrying
+  }
+}
+
+void processServerMessage() {
+  Serial.println("Received from server: " + clientData);
+  if (clientData.equals("ENTRY")) {
+    Serial.println("Barrier is opening");
+    digitalWrite(relayPin, LOW);  // Trigger the relay (barrier open)
+    delay(500);  // Keep the relay open for 500ms
+    digitalWrite(relayPin, HIGH);  // Turn off the relay (barrier close)
+  }
+}
