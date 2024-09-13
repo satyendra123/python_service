@@ -1,0 +1,190 @@
+python server code which accepts the ip 192.168.1.151 and port 6000 arduino will connect with this ip and port only to the python server
+import socket
+import datetime
+import time
+import mysql.connector
+import threading
+
+# Configuration file path
+CONFIG_FILE = "config.txt"
+LOG_FILE = "exit_connection_log.txt"
+
+def read_config():
+    config = {}
+    with open(CONFIG_FILE, 'r') as file:
+        for line in file:
+            if '=' in line:
+                key, value = line.strip().split('=', 1)
+                config[key.strip()] = value.strip()
+    return config
+
+def log_message(message):
+    with open(LOG_FILE, 'a') as log:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log.write(f"{timestamp}: {message}\n")
+
+def send_message(client_socket, message):
+    try:
+        client_socket.sendall(message.encode())
+        log_message(f"Sent message: {message}")
+    except Exception as e:
+        log_message(f"Failed to send message: {e}")
+
+def check_exit_boom(client_socket, db_config, retry_interval):
+    last_status = None
+    while True:
+        try:
+            conn = mysql.connector.connect(**db_config)
+            cursor = conn.cursor()
+
+            query = "SELECT exitboom FROM boomsig1"
+            cursor.execute(query)
+
+            result = cursor.fetchone()
+            if result:
+                exit_boom_status = result[0]
+                if exit_boom_status == 'Y':
+                    if last_status != 'Y':
+                        log_message("Exit boom is open")
+                        send_message(client_socket, "RELAY_ON")  # Send command to trigger relay
+                        time.sleep(3)  # Simulate wait time
+                        cursor.execute("UPDATE boomsig1 SET exitboom = 'N'")
+                        conn.commit()
+                        log_message("Exit boom status reset to 'N' after 3 seconds")
+                last_status = exit_boom_status
+
+            cursor.close()
+            conn.close()
+
+        except mysql.connector.Error as err:
+            log_message(f"Error: {err}")
+        
+        time.sleep(retry_interval / 1000.0)  # Convert milliseconds to seconds
+
+def send_health_packets(client_socket, timer_interval):
+    while True:
+        try:
+            send_message(client_socket, "HLT")
+            time.sleep(timer_interval / 1000.0)  # Convert milliseconds to seconds
+        except Exception as e:
+            log_message(f"Failed to send health packet: {e}")
+
+def main():
+    config = read_config()
+
+    SERVER_IP = config.get('Server_IP', '127.0.0.1')
+    SERVER_PORT = int(config.get('Port', 7000))
+    TIMER_MILLISEC = int(config.get('TimerMilliSec', 5000))
+    RETRY_MILLISEC = int(config.get('Retry_milisec', 30000))
+    
+    db_config = {
+        'host': config.get('DbPath', '127.0.0.1').split('=')[1],
+        'user': config.get('user', 'root'),
+        'password': config.get('password', ''),
+        'database': config.get('database', 'paytm_park')
+    }
+
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    try:
+        client_socket.connect((SERVER_IP, SERVER_PORT))
+        log_message(f"Connected to {SERVER_IP}:{SERVER_PORT}")
+
+        # Start the exit boom check in a separate thread
+        thread_check = threading.Thread(target=check_exit_boom, args=(client_socket, db_config, RETRY_MILLISEC))
+        thread_check.daemon = True
+        thread_check.start()
+
+        # Start sending health packets in a separate thread
+        thread_health = threading.Thread(target=send_health_packets, args=(client_socket, TIMER_MILLISEC))
+        thread_health.daemon = True
+        thread_health.start()
+
+        while True:
+            data = client_socket.recv(1024)
+            if data:
+                decoded_data = data.decode('utf-8')
+                if "HLT" in decoded_data:
+                    log_message(f"Received health packet: {decoded_data}")
+
+    except ConnectionRefusedError:
+        log_message(f"Connection to {SERVER_IP}:{SERVER_PORT} was refused.")
+    except TimeoutError:
+        log_message("Connection timed out. Check IP and port.")
+    except Exception as e:
+        log_message(f"An error occurred: {e}")
+
+    finally:
+        client_socket.close()
+
+if __name__ == "__main__":
+    main()
+
+this is my arduino code
+#include <SPI.h>
+#include <Ethernet.h>
+
+// Network configuration
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress server(192, 168, 1, 100);  // IP address of the Python server
+int port = 12345;  // Port on which the server is listening
+
+EthernetClient client;
+
+// Relay pin
+const int relayPin = 7;
+const int healthCheckInterval = 3000; // 3 seconds
+
+unsigned long lastHealthCheckTime = 0;
+
+void setup() {
+  // Initialize the relay pin as an output
+  pinMode(relayPin, OUTPUT);
+  digitalWrite(relayPin, LOW);  // Ensure relay is off initially
+
+  // Start the Ethernet connection
+  Ethernet.begin(mac);
+  Serial.begin(9600);
+
+  delay(1000);
+
+  // Attempt to connect to the server
+  if (client.connect(server, port)) {
+    Serial.println("Connected to server");
+  } else {
+    Serial.println("Connection failed");
+  }
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // Send health check message every 3 seconds
+  if (client.connected() && (currentMillis - lastHealthCheckTime >= healthCheckInterval)) {
+    client.println("HLT");
+    lastHealthCheckTime = currentMillis;
+  }
+
+  // Check if there's data available to read
+  if (client.available()) {
+    String command = client.readStringUntil('\n');
+    Serial.print("Received command: ");
+    Serial.println(command);
+
+    // Process the command
+    if (command == "RELAY_ON") {
+      digitalWrite(relayPin, HIGH);  // Turn relay on
+    } else if (command == "RELAY_OFF") {
+      digitalWrite(relayPin, LOW);  // Turn relay off
+    }
+  }
+
+  // Check if the connection is closed
+  if (!client.connected()) {
+    Serial.println("Disconnected from server");
+    client.stop();
+    while (true) {
+      delay(1);  // Do nothing here, just wait
+    }
+  }
+}
