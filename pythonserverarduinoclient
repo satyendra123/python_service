@@ -1,77 +1,146 @@
 python code as a server- isme humne database ka connection kaisa banaya hai wo samjhne ki kosis karte hai. man lo mere pass ek system hai aur usme mera database ka file dala hua hai aur mere apss ek aur system hai aur ye code mai dusre system me chala rha hu aur mai chahta hu ki 
 ye jo mera client system hai isme jo python code chal rha hai. wo server wale db se connect ho jaye to mujhe host me localhost ki jagah par server wale system ki ip dalni hogi. jaise man lo ki mera database jis system me chal rha hai uski ip hai 192.168.40.100 to mujhe database me host ji jagah par ye ip likhni hogi
 aur ye dono system connected rhne chahiye lan cable se ek dusre se. switch aur router ke through
+DbPath=host=127.0.0.1;user=root;password=;database=paytm_park;
+Server_IP=192.168.1.151
+Port=7000
+Retry_milisec=30000
+DebugLog=True
+TimerMilliSec=5000
+
+step-2 ye humara EntryBarrier.py wala code hai
 import socket
-import mysql.connector
+import datetime
 import time
+import mysql.connector
 import threading
 
-# Server IP and Port
-SERVER_IP = '192.168.1.157'  # Adjust to your server's IP
-SERVER_PORT = 7000
-INITIAL_MESSAGE = "|ENTRY%"  # Command to send to Arduino
+CONFIG_FILE = "config.txt"
+LOG_FILE = "logfile.txt"  # Define the log file name
 
-# MySQL database configuration
-db_config = {
-    'host': '192.168.40.100',
-    'user': 'root',
-    'password': '',
-    'database': 'paytm_park'
-}
+def read_config():
+    config = {}
+    with open(CONFIG_FILE, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if "=" in line:
+                key, value = line.split("=", 1)
+                config[key] = value
+    return config
 
-# Function to handle client (Arduino)
-def handle_client(client_socket):
-    print("Arduino client connected.")
-    while True:
-        # Check the database for exitbarrier status
-        try:
-            conn = mysql.connector.connect(**db_config)
-            cursor = conn.cursor()
+def parse_db_config(db_path):
+    db_config = {}
+    items = db_path.split(";")
+    for item in items:
+        if "=" in item:
+            key, value = item.split("=")
+            db_config[key] = value
+    return db_config
 
-            query = "SELECT exitbarrier FROM boomsig"
-            cursor.execute(query)
+def log_message(message, debug_mode=True):
+    if not debug_mode:
+        return
+
+    with open(LOG_FILE, 'a') as log:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log.write(f"{timestamp}: {message}\n")
+
+def send_initial_message(client_socket):
+    try:
+        client_socket.sendall(INITIAL_MESSAGE.encode())
+        log_message(f"Sent initial message: {INITIAL_MESSAGE}")
+    except Exception as e:
+        log_message(f"Failed to send initial message: {e}")
+
+def check_exit_boom(client_socket, db_conn, timer_millisec):
+    try:
+        cursor = db_conn.cursor()
+        while True:
+            cursor.execute("SELECT exitboom FROM boomsig1")
             result = cursor.fetchone()
 
             if result:
-                exit_barrier_status = result[0]
-                if exit_barrier_status == 'Y':
-                    print("Exit barrier is open (Y detected). Sending command to Arduino.")
-                    # Send the command to the Arduino client
-                    client_socket.sendall(INITIAL_MESSAGE.encode())
+                exit_boom_status = result[0]
+                if exit_boom_status == 'Y':
+                    log_message("Exit boom is open")
+                    send_initial_message(client_socket)
+                    time.sleep(3)
+                    
+                    # Update the exitboom status back to 'N' after the message is sent
+                    cursor.execute("UPDATE boomsig1 SET exitboom = 'N'")
+                    db_conn.commit()
+                    log_message("Exit boom status reset to 'N' after 3 seconds")
 
-                    # Reset the barrier to 'N' after sending the command
-                    cursor.execute("UPDATE boomsig SET exitbarrier = 'N'")
-                    conn.commit()
-                    print("Exit barrier status reset to 'N' after sending the command.")
+            time.sleep(timer_millisec / 1000)  # Sleep for the timer duration
+    except mysql.connector.Error as err:
+        log_message(f"Database error: {err}")
+    finally:
+        cursor.close()
 
-            cursor.close()
-            conn.close()
+def connect_to_db(db_config, retry_millisec, debug_mode):
+    """Tries to connect to the database, logs errors, and retries on failure."""
+    db_conn = None
+    while db_conn is None:
+        try:
+            db_conn = mysql.connector.connect(**db_config)
+            log_message("Database connection established.", debug_mode)
         except mysql.connector.Error as err:
-            print(f"Database error: {err}")
+            log_message(f"Database connection error: {err}", debug_mode)
+            log_message(f"Retrying in {retry_millisec} milliseconds...", debug_mode)
+            time.sleep(retry_millisec / 1000)  # Wait before retrying
+    return db_conn
 
-        # Wait before checking the database again
-        time.sleep(2)
+def main():
+    config = read_config()
 
-# Function to start the server and accept client connections
-def start_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((SERVER_IP, SERVER_PORT))
-    server_socket.listen(5)
-    print(f"Server started on {SERVER_IP}:{SERVER_PORT}")
+    SERVER_IP = config['Server_IP']
+    SERVER_PORT = int(config['Port'])
+    DB_PATH = config['DbPath']
+    RETRY_MILLISECONDS = int(config['Retry_milisec'])
+    TIMER_MILLISECONDS = int(config['TimerMilliSec'])
+    DEBUG_LOG = config['DebugLog'] == 'True'
+    
+    db_config = parse_db_config(DB_PATH)
 
-    while True:
-        # Wait for Arduino to connect
-        client_socket, client_address = server_socket.accept()
-        print(f"Connection accepted from {client_address}")
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # Handle the client communication in a separate thread
-        client_thread = threading.Thread(target=handle_client, args=(client_socket,))
-        client_thread.daemon = True
-        client_thread.start()
+    # Initialize db_conn to None
+    db_conn = None
+
+    try:
+        client_socket.connect((SERVER_IP, SERVER_PORT))
+        log_message(f"Connected to {SERVER_IP}:{SERVER_PORT}", DEBUG_LOG)
+
+        # Attempt to connect to the database and retry if failed
+        db_conn = connect_to_db(db_config, RETRY_MILLISECONDS, DEBUG_LOG)
+
+        # Start a thread to monitor exit boom status and interact with the database
+        thread = threading.Thread(target=check_exit_boom, args=(client_socket, db_conn, TIMER_MILLISECONDS))
+        thread.daemon = True
+        thread.start()
+
+        while True:
+            data = client_socket.recv(1024)
+            if data:
+                decoded_data = data.decode('utf-8')
+                if "|HLT%" in decoded_data:
+                    log_message(f"Received health packet: {decoded_data}", DEBUG_LOG)
+
+    except ConnectionRefusedError:
+        log_message(f"Connection to {SERVER_IP}:{SERVER_PORT} was refused.", DEBUG_LOG)
+    except TimeoutError:
+        log_message("Connection timed out. Check IP and port.", DEBUG_LOG)
+    except Exception as e:
+        log_message(f"An error occurred: {e}", DEBUG_LOG)
+    finally:
+        # Safely close the client socket and the database connection if they exist
+        if client_socket:
+            client_socket.close()
+        if db_conn:
+            db_conn.close()
 
 if __name__ == "__main__":
-    start_server()
-
+    main()
 
 arduino as a client
 #include <SPI.h>
