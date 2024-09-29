@@ -14,6 +14,7 @@ import mysql.connector
 import threading
 
 CONFIG_FILE = "config.txt"
+LOG_FILE = "Exit_connection.txt"
 
 def read_config():
     config = {}
@@ -118,6 +119,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 follow these lines for making the windows services
 step-1 open the cmd and write- cd C:\Parking Management System - Houston Systems\Services\BoomService\EntryBoompython
