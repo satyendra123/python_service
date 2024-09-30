@@ -9,14 +9,28 @@ import time
 import mysql.connector
 import threading
 
-SERVER_IP = '192.168.1.157'
-SERVER_PORT = 7000
+CONFIG_FILE = "config.txt"
+LOG_FILE = "Exit_Boom_services.txt"  # Define the log file name
 INITIAL_MESSAGE = "|ENTRY%"
-HLT_MESSAGE = "|HLT%"
-LOG_FILE = "exit_connection_log.txt"
 
-# MySQL database configuration
-db_config = {'host': '192.168.40.100', 'user': 'root', 'password': '', 'database': 'paytm_park'}
+def read_config():
+    config = {}
+    with open(CONFIG_FILE, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if "=" in line:
+                key, value = line.split("=", 1)
+                config[key] = value
+    return config
+
+def parse_db_config(db_path):
+    db_config = {}
+    items = db_path.split(";")
+    for item in items:
+        if "=" in item:
+            key, value = item.split("=")
+            db_config[key] = value
+    return db_config
 
 def log_message(message):
     with open(LOG_FILE, 'a') as log:
@@ -30,7 +44,7 @@ def send_message(client_socket, message):
     except Exception as e:
         log_message(f"Failed to send message: {e}")
 
-def check_exit_boom(client_socket):
+def check_exit_boom(client_socket, db_config):
     last_status = None
     while True:
         try:
@@ -48,6 +62,8 @@ def check_exit_boom(client_socket):
                         log_message("Exit boom is open")
                         send_message(client_socket, INITIAL_MESSAGE)
                         time.sleep(3)  # Simulate wait time
+                        
+                        # Update the exitboom status back to 'N'
                         cursor.execute("UPDATE boomsig1 SET exitboom = 'N'")
                         conn.commit()
                         log_message("Exit boom status reset to 'N' after 3 seconds")
@@ -55,36 +71,46 @@ def check_exit_boom(client_socket):
 
             cursor.close()
             conn.close()
-
+            time.sleep(3)  # Wait before next check
         except mysql.connector.Error as err:
-            log_message(f"Error: {err}")
-        
-        time.sleep(1)  # Adjust the sleep duration as needed to control the check frequency
-
-def send_health_packets(client_socket):
-    while True:
-        try:
-            send_message(client_socket, HLT_MESSAGE)
-            time.sleep(30)  # Send health packet every 30 seconds
+            log_message(f"Database error: {err}")
+            time.sleep(3)  # Wait before retrying on error
         except Exception as e:
-            log_message(f"Failed to send health packet: {e}")
+            log_message(f"Unexpected error: {e}")
+            break  # Exit the loop if an unexpected error occurs
+
+def connect_to_db(db_config):
+    """Tries to connect to the database, logs errors, and retries on failure."""
+    db_conn = None
+    while db_conn is None:
+        try:
+            db_conn = mysql.connector.connect(**db_config)
+            log_message("Database connection established.")
+        except mysql.connector.Error as err:
+            log_message(f"Database connection error: {err}")
+            log_message("Retrying in 3 seconds...")
+            time.sleep(3)  # Wait before retrying
+    return db_conn
 
 def main():
+    config = read_config()
+
+    SERVER_IP = config['Server_IP']
+    SERVER_PORT = int(config['Port'])
+    DB_PATH = config['DbPath']
+
+    db_config = parse_db_config(DB_PATH)
+
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         client_socket.connect((SERVER_IP, SERVER_PORT))
         log_message(f"Connected to {SERVER_IP}:{SERVER_PORT}")
 
-        # Start the exit boom check in a separate thread
-        thread_check = threading.Thread(target=check_exit_boom, args=(client_socket,))
-        thread_check.daemon = True
-        thread_check.start()
-
-        # Start sending health packets in a separate thread
-        thread_health = threading.Thread(target=send_health_packets, args=(client_socket,))
-        thread_health.daemon = True
-        thread_health.start()
+        # Start a thread to monitor exit boom status and interact with the database
+        thread = threading.Thread(target=check_exit_boom, args=(client_socket, db_config))
+        thread.daemon = True
+        thread.start()
 
         while True:
             data = client_socket.recv(1024)
@@ -99,12 +125,14 @@ def main():
         log_message("Connection timed out. Check IP and port.")
     except Exception as e:
         log_message(f"An error occurred: {e}")
-
     finally:
-        client_socket.close()
+        # Safely close the client socket
+        if client_socket:
+            client_socket.close()
 
 if __name__ == "__main__":
     main()
+
 
 #Step-3 so sabse pahle hum apna exit2boom.py code ko exit2boom.exe me convert kar lunga kuch ia tarah se pyinstaller --onefile exit2boom.py so dist folder me mera ek .exe ban jayega is exe ko mai cut karke apne isi folder me paste kar dunga C:\fastag_rfid
 
