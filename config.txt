@@ -1,0 +1,6 @@
+DbPath=host=192.168.1.237;user=root;password=;database=paytm_park
+Server_IP=192.168.1.155
+Port=7000
+Retry_milisec=30000
+DebugLog=True
+TimerMilliSec=5000
